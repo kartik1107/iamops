@@ -1,108 +1,66 @@
 #!/usr/bin/env python3
 
-import argparse
-import requests
+import os
 import sys
-
-# Replace with the correct Vantage API endpoint
-API_URL = "https://api.vantage.sh/v1/instances"
+import requests
 
 
-def fetch_instances(token):
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json"
-    }
+# Jenkins parameter:
+# INSTANCE_FAMILY=m7
+INSTANCE_FAMILY = os.getenv("INSTANCE_FAMILY")
 
-    response = requests.get(API_URL, headers=headers, timeout=30)
+if len(sys.argv) > 1:
+    INSTANCE_FAMILY = sys.argv[1]
 
+if not INSTANCE_FAMILY:
+    print("ERROR: Please provide an instance family.")
+    print("Usage: python find_cheapest_instance.py m7")
+    sys.exit(1)
+
+# Public pricing dataset maintained by Vantage
+URL = "https://instances.vantage.sh/instances.json"
+
+try:
+    response = requests.get(URL, timeout=30)
     response.raise_for_status()
+    instances = response.json()
+except Exception as e:
+    print(f"Failed to retrieve pricing data: {e}")
+    sys.exit(1)
 
-    return response.json()
+matches = []
 
+for instance in instances:
+    instance_type = instance.get("instance_type", "")
 
-def get_price(instance):
-    """
-    Update this if your API response differs.
-    """
-    try:
-        return float(instance["pricing"]["linux"]["ondemand"])
-    except Exception:
-        return None
+    # Match family
+    if not instance_type.startswith(INSTANCE_FAMILY):
+        continue
 
+    pricing = instance.get("pricing", {})
+    us_east_1 = pricing.get("us-east-1", {})
 
-def find_cheapest(instances, family, min_vcpu, min_memory):
+    linux_price = us_east_1.get("linux", {}).get("ondemand")
 
-    matches = []
+    if linux_price is None:
+        continue
 
-    for inst in instances:
+    matches.append({
+        "instance_type": instance_type,
+        "price": float(linux_price),
+        "vcpu": instance.get("vCPU"),
+        "memory": instance.get("memory"),
+    })
 
-        instance_type = inst.get("instance_type", "")
+if not matches:
+    print(f"No instances found for family '{INSTANCE_FAMILY}'")
+    sys.exit(1)
 
-        if not instance_type.startswith(family):
-            continue
+cheapest = min(matches, key=lambda x: x["price"])
 
-        if inst.get("vcpus", 0) < min_vcpu:
-            continue
-
-        if inst.get("memory", 0) < min_memory:
-            continue
-
-        price = get_price(inst)
-
-        if price is None:
-            continue
-
-        matches.append({
-            "instance": instance_type,
-            "vcpus": inst["vcpus"],
-            "memory": inst["memory"],
-            "price": price
-        })
-
-    if not matches:
-        return None
-
-    return min(matches, key=lambda x: x["price"])
-
-
-def main():
-
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("--family", required=True)
-    parser.add_argument("--vcpu", required=True, type=int)
-    parser.add_argument("--memory", required=True, type=float)
-    parser.add_argument("--token", required=True)
-
-    args = parser.parse_args()
-
-    try:
-        instances = fetch_instances(args.token)
-    except Exception as e:
-        print(f"Failed to fetch Vantage API: {e}")
-        sys.exit(1)
-
-    cheapest = find_cheapest(
-        instances,
-        args.family,
-        args.vcpu,
-        args.memory
-    )
-
-    if cheapest is None:
-        print("No matching instance found.")
-        sys.exit(1)
-
-    print("\n========================================")
-    print("Lowest-priced EC2 Instance")
-    print("========================================")
-    print(f"Instance : {cheapest['instance']}")
-    print(f"vCPUs    : {cheapest['vcpus']}")
-    print(f"Memory   : {cheapest['memory']} GiB")
-    print(f"Price    : ${cheapest['price']}/hour")
-    print("========================================")
-
-
-if __name__ == "__main__":
-    main()
+print("\n=== Cheapest Instance ===")
+print(f"Family        : {INSTANCE_FAMILY}")
+print(f"Instance Type : {cheapest['instance_type']}")
+print(f"vCPU          : {cheapest['vcpu']}")
+print(f"Memory        : {cheapest['memory']}")
+print(f"Price/hour    : ${cheapest['price']:.6f}")
