@@ -1,51 +1,136 @@
 pipeline {
-    agent any
 
-    parameters {
-        choice(
-            name: 'INSTANCE_FAMILY',
-            choices: ['t', 'm', 'c', 'r'],
-            description: 'EC2 Instance Family'
-        )
+    agent {
+        kubernetes {
 
-        string(
-            name: 'MIN_VCPU',
-            defaultValue: '2',
-            description: 'Minimum vCPUs'
-        )
+            defaultContainer 'python'
 
-        string(
-            name: 'MIN_MEMORY',
-            defaultValue: '4',
-            description: 'Minimum Memory (GiB)'
-        )
+            yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: ec2-pricing
+spec:
+  containers:
+  - name: python
+    image: kartikvijan14/jenkins-python-agent:1.0
+    imagePullPolicy: Always
+    command:
+      - cat
+    tty: true
+'''
+        }
     }
 
-    environment {
-        VANTAGE_TOKEN = credentials('vantage-pat')
+    options {
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(
+            numToKeepStr: '10',
+            artifactNumToKeepStr: '5'
+        ))
+    }
+
+    parameters {
+
+        choice(
+            name: 'INSTANCE_FAMILY',
+            choices: [
+                't3',
+                't4g',
+                'm5',
+                'm6i',
+                'm7',
+                'c5',
+                'c6i',
+                'c7g',
+                'r5',
+                'r6i',
+                'r7g'
+            ],
+            description: 'Select EC2 Instance Family'
+        )
     }
 
     stages {
 
-        stage('Install Dependencies') {
+        stage('Checkout Source') {
             steps {
-                sh '''
-                python3 -m pip install --upgrade pip
-                pip3 install requests
-                '''
+                checkout scm
             }
         }
 
-        stage('Find Cheapest EC2') {
+        stage('Verify Environment') {
             steps {
-                sh """
-                python3 ec2_price.py \
-                    --family ${params.INSTANCE_FAMILY} \
-                    --vcpu ${params.MIN_VCPU} \
-                    --memory ${params.MIN_MEMORY} \
-                    --token ${VANTAGE_TOKEN}
-                """
+                container('python') {
+                    sh '''
+                        echo "======================================"
+                        echo "Environment Verification"
+                        echo "======================================"
+
+                        python --version
+                        pip --version
+                        git --version
+                        curl --version | head -1
+
+                        echo "======================================"
+                    '''
+                }
             }
+        }
+
+        stage('Verify Files') {
+            steps {
+                container('python') {
+                    sh '''
+                        echo "Workspace Contents"
+                        ls -lh
+
+                        if [ ! -f get_ec2_price.py ]; then
+                            echo "ERROR: get_ec2_price.py not found."
+                            exit 1
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Find Cheapest EC2 Instance') {
+            steps {
+                container('python') {
+                    sh '''
+                        echo ""
+                        echo "======================================"
+                        echo "Searching Cheapest EC2 Instance"
+                        echo "======================================"
+
+                        python get_ec2_price.py ${INSTANCE_FAMILY}
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+
+        success {
+            echo '''
+==========================================
+Pipeline completed successfully.
+==========================================
+'''
+        }
+
+        failure {
+            echo '''
+==========================================
+Pipeline failed.
+==========================================
+'''
+        }
+
+        always {
+            deleteDir()
         }
     }
 }
