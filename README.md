@@ -1,8 +1,8 @@
-**EC2 Pricing Jenkins Pipeline
-**This project contains a Jenkins Pipeline that retrieves AWS EC2 pricing from a public API and displays the cheapest instance for the selected family.
+EC2 Pricing Jenkins Pipeline
 
-**Technologies:
-**
+This project contains a Jenkins Pipeline that retrieves AWS EC2 pricing from a public API and displays the cheapest instance for the selected family.
+
+Technologies:
 - Jenkins
 - Kubernetes (Minikube)
 - Envoy Gateway
