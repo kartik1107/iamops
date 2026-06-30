@@ -22,7 +22,7 @@ pipeline {
     }
 
     environment {
-        VANTAGE_TOKEN = credentials('vntg_tkn_6eb36e28befe679a8d08134abdacbf7d66cd2d4c')
+        VANTAGE_TOKEN = credentials('vantage-pat')
     }
 
     stages {
